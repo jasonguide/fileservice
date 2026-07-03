@@ -1,0 +1,18 @@
+services:
+  fileservice:
+    build: .
+    container_name: fileservice
+    user: "0:0"          # 以 root 用户运行
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    volumes:
+      # 映射数据目录到NAS的文件路径，请修改左侧为实际路径
+      - /your/nas/path/files:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - PORT=8010
+      - DATA_DIR=/data
+    # 资源限制：内存最大200MB
+    mem_limit: 200m
+    memswap_limit: 200m

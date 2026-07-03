@@ -1,0 +1,12 @@
+# Binary
+fileservice
+fileservice.exe
+
+# Test data
+testdata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
