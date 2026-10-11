@@ -4,7 +4,10 @@ fileservice.exe
 
 # Test data
 testdata/
-data/
+# data/ 下只保留初始化时的 test-file.txt，其余测试文件不入库。
+# 目录级排除 (data/) 会让 Git 无法反向包含其中的文件，必须用通配 + 反选。
+data/*
+!data/test-file.txt
 
 # IDE
 .idea/
