@@ -161,7 +161,7 @@ function renderTable() {
             if (file.isDir) {
                 navigateTo(joinPath(currentPath, file.name));
             } else {
-                openFile(currentPath, file.name);
+                openFile(joinPath(currentPath, file.name), file.name, file.preview, file.size);
             }
         };
         nameTd.appendChild(nameDiv);
@@ -185,31 +185,33 @@ function renderTable() {
         actionsDiv.className = 'row-actions';
 
         if (!file.isDir) {
+            const fullPath = joinPath(currentPath, file.name);
+
+            // Preview (only for whitelisted types; the backend reports which)
+            if (file.preview) {
+                const previewBtn = document.createElement('button');
+                previewBtn.className = 'icon-btn';
+                previewBtn.title = '预览';
+                previewBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+                previewBtn.onclick = (e) => { e.stopPropagation(); openFile(fullPath, file.name, file.preview, file.size); };
+                actionsDiv.appendChild(previewBtn);
+            }
+
             // Download
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'icon-btn';
             downloadBtn.title = '下载';
             downloadBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-            downloadBtn.onclick = (e) => { e.stopPropagation(); downloadFile(joinPath(currentPath, file.name)); };
+            downloadBtn.onclick = (e) => { e.stopPropagation(); downloadFile(fullPath); };
             actionsDiv.appendChild(downloadBtn);
 
-            // Open in new tab
+            // Open in new tab (preview endpoint when renderable, else download)
             const openBtn = document.createElement('button');
             openBtn.className = 'icon-btn';
-            openBtn.title = '新标签页打开';
+            openBtn.title = file.preview ? '新标签页打开预览' : '新标签页打开';
             openBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-            openBtn.onclick = (e) => { e.stopPropagation(); openInNewTab(joinPath(currentPath, file.name)); };
+            openBtn.onclick = (e) => { e.stopPropagation(); openInNewTab(fullPath, !!file.preview); };
             actionsDiv.appendChild(openBtn);
-
-            // Edit (for text files)
-            if (isTextFile(file.name)) {
-                const editBtn = document.createElement('button');
-                editBtn.className = 'icon-btn';
-                editBtn.title = '编辑';
-                editBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-                editBtn.onclick = (e) => { e.stopPropagation(); editFile(joinPath(currentPath, file.name), file.name); };
-                actionsDiv.appendChild(editBtn);
-            }
         }
 
         // Delete
@@ -234,11 +236,6 @@ function renderTable() {
             arrow.classList.add(sortDir);
         }
     });
-}
-
-function isTextFile(name) {
-    const ext = name.split('.').pop().toLowerCase();
-    return ['txt','md','log','csv','json','xml','html','css','js','ts','jsx','tsx','go','py','java','c','cpp','rs','sh','yml','yaml','toml','vue','php','ini','conf','env'].includes(ext);
 }
 
 // ===== Navigation =====
@@ -280,16 +277,23 @@ async function downloadFile(path) {
     document.body.removeChild(link);
 }
 
-function openInNewTab(path) {
-    window.open(`/api/download?path=${encodeURIComponent(path)}`, '_blank');
+function previewUrl(path) {
+    return `/api/preview?path=${encodeURIComponent(path)}`;
 }
 
-async function openFile(path, name) {
-    if (isTextFile(name)) {
-        editFile(path, name);
-    } else {
-        openInNewTab(path);
+function openInNewTab(path, previewable) {
+    window.open(previewable ? previewUrl(path) : `/api/download?path=${encodeURIComponent(path)}`, '_blank');
+}
+
+// Opens the preview modal. Text-like files are fetched so they can be shown and
+// edited in place; everything else is rendered from /api/preview, which streams
+// with Range support so video and audio can be scrubbed without a full download.
+async function openFile(path, name, kind, size) {
+    if (kind) {
+        openPreview(path, name, kind, size);
+        return;
     }
+    openInNewTab(path);
 }
 
 async function deleteItem(path, name) {
@@ -303,49 +307,424 @@ async function deleteItem(path, name) {
     }
 }
 
-// ===== Editor =====
-let editingFilePath = null;
+// ===== Preview =====
+// The renderer kind comes from the backend (/api/list -> item.preview) so the
+// whitelist lives in exactly one place. Kinds: image, svg, html, pdf, video,
+// audio, markdown, text.
+const EDITABLE_KINDS = ['text', 'markdown'];
 
-async function editFile(path, name) {
-    editingFilePath = path;
-    document.getElementById('editorTitle').textContent = name || '编辑文件';
-    document.getElementById('editorTextarea').value = '';
-    document.getElementById('editorModal').style.display = 'flex';
-    
-    try {
-        const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
-        if (data.data && data.data.content !== undefined) {
-            document.getElementById('editorTextarea').value = data.data.content;
+let previewState = null; // { path, name, kind, size, content, editing, truncated, loaded }
+
+function openPreview(path, name, kind, size) {
+    previewState = { path, name, kind, size: size || 0, content: null, editing: false, truncated: false, loaded: false };
+
+    document.getElementById('previewTitle').textContent = name;
+    document.getElementById('previewIcon').innerHTML = getFileIcon(name, false);
+    document.getElementById('previewMeta').textContent = size ? formatSize(size) : '';
+    // Text-like files only become editable once their content has actually
+    // loaded: until the fetch reports whether the file was truncated, offering
+    // an editor could invite a save that wipes everything past the limit.
+    document.getElementById('previewEditBtn').style.display = 'none';
+    document.getElementById('previewFooter').style.display = 'none';
+    document.getElementById('previewModal').style.display = 'flex';
+
+    renderPreviewBody();
+}
+
+function closePreview() {
+    if (previewState && previewState.editing) {
+        if (!confirm('有未保存的修改，确定关闭吗？')) return;
+    }
+    document.getElementById('previewModal').style.display = 'none';
+    document.getElementById('previewBody').innerHTML = '';
+    previewState = null;
+}
+
+function renderPreviewBody() {
+    const body = document.getElementById('previewBody');
+    body.innerHTML = '';
+    if (!previewState) return;
+    body.className = 'modal-body preview-body kind-' + previewState.kind;
+
+    const url = `/api/preview?path=${encodeURIComponent(previewState.path)}`;
+
+    switch (previewState.kind) {
+        case 'image':
+        case 'svg': {
+            // SVG goes through <img> rather than an iframe or a top-level tab:
+            // an image is a non-scripting context, so embedded script cannot run.
+            const img = document.createElement('img');
+            img.className = 'preview-image';
+            img.src = url;
+            img.alt = previewState.name;
+            body.appendChild(img);
+            break;
         }
-    } catch (err) {
-        // If can't load, start with empty editor
+        case 'video': {
+            const v = document.createElement('video');
+            v.className = 'preview-video';
+            v.src = url;
+            v.controls = true;
+            v.preload = 'metadata';
+            body.appendChild(v);
+            break;
+        }
+        case 'audio': {
+            const a = document.createElement('audio');
+            a.className = 'preview-audio';
+            a.src = url;
+            a.controls = true;
+            a.preload = 'metadata';
+            body.appendChild(a);
+            break;
+        }
+        case 'pdf':
+        case 'html': {
+            const frame = document.createElement('iframe');
+            frame.className = 'preview-frame';
+            frame.src = url;
+            // Both types are served with a sandboxing CSP, so this attribute is
+            // belt-and-braces for the case where the header is stripped by a proxy.
+            frame.setAttribute('sandbox', '');
+            body.appendChild(frame);
+            break;
+        }
+        case 'markdown':
+        case 'text':
+        default:
+            renderTextPreview(body);
+            break;
     }
 }
 
-function closeEditor() {
-    document.getElementById('editorModal').style.display = 'none';
-    editingFilePath = null;
+async function renderTextPreview(body) {
+    // The body is re-rendered on every preview/edit toggle, so the content is
+    // fetched once per open and reused; otherwise each toggle would pull the
+    // whole file across the network again.
+    if (previewState.content === null) {
+        const loading = document.createElement('div');
+        loading.className = 'preview-loading';
+        loading.textContent = '加载中...';
+        body.appendChild(loading);
+
+        let loaded = '';
+        try {
+            // Preview is always the bounded first chunk: the backend reads at
+            // most 1 MB and reports truncation, so opening a huge log stays
+            // flat in memory. ?full=1 is only requested when the user actually
+            // opens the editor (see toggleEdit).
+            const data = await api(`/api/file?path=${encodeURIComponent(previewState.path)}`);
+            loaded = (data.data && data.data.content) || '';
+            previewState.truncated = !!(data.data && data.data.truncated);
+            previewState.size = (data.data && data.data.size) || previewState.size;
+        } catch (err) {
+            // The modal may have been closed while the request was in flight.
+            if (!previewState) return;
+            body.innerHTML = '';
+            const errEl = document.createElement('div');
+            errEl.className = 'preview-error';
+            errEl.textContent = '无法加载文件内容: ' + err.message;
+            body.appendChild(errEl);
+            return;
+        }
+
+        // Only commit the fetch result once it is in hand. Assigning earlier
+        // would leave content non-null while this call is still suspended, so a
+        // second render (a fast edit toggle) would skip the loading branch and
+        // paint an empty body with no textarea in it.
+        if (!previewState) return;
+        previewState.content = loaded;
+        previewState.loaded = true;
+        // A prefix is not safe to edit, so the entry point stays hidden rather
+        // than letting a save truncate the file to the loaded chunk.
+        syncEditButton();
+    }
+
+    if (!previewState) return;
+    body.innerHTML = '';
+
+    if (previewState.kind === 'markdown') {
+        if (previewState.truncated) {
+            body.appendChild(buildTruncationNotice());
+        }
+        if (previewState.editing) {
+            body.appendChild(buildTextarea(previewState.content));
+        } else {
+            const article = document.createElement('div');
+            article.className = 'markdown-body';
+            article.innerHTML = renderMarkdown(previewState.content);
+            body.appendChild(article);
+        }
+        return;
+    }
+
+    if (previewState.truncated) {
+        body.appendChild(buildTruncationNotice());
+    }
+
+    if (previewState.editing) {
+        body.appendChild(buildTextarea(previewState.content));
+    } else {
+        const pre = document.createElement('pre');
+        pre.className = 'preview-text';
+        pre.textContent = previewState.content;
+        body.appendChild(pre);
+    }
 }
 
-async function saveEditor() {
-    if (!editingFilePath) return;
-    const content = document.getElementById('editorTextarea').value;
+// Mirrors textEditLimit on the backend. The editor loads the whole file so a
+// save cannot drop the tail, and a full load costs about 4x the file size in
+// peak memory, so the ceiling has to stay well under the container budget.
+const EDIT_LIMIT = 32 * 1024 * 1024;
+
+// syncEditButton is the single place that decides whether the edit entry point
+// is reachable. It stays hidden while content is still loading, and hidden for
+// files past EDIT_LIMIT, which the editor could not hold anyway.
+function syncEditButton() {
+    if (!previewState) return;
+    const canEdit = EDITABLE_KINDS.includes(previewState.kind)
+        && previewState.loaded
+        && previewState.size <= EDIT_LIMIT;
+    document.getElementById('previewEditBtn').style.display = canEdit ? '' : 'none';
+}
+
+// buildTruncationNotice explains why only part of a file is on screen. The
+// wording differs by whether the editor can still load the whole file, so the
+// user knows if editing is available before clicking anything.
+function buildTruncationNotice() {
+    const el = document.createElement('div');
+    el.className = 'preview-truncated';
+    const total = formatSize(previewState.size);
+    if (previewState.size > EDIT_LIMIT) {
+        el.textContent = '文件较大（' + total + '），仅预览前 1 MB。超过 32 MB 的文件不支持在线编辑，请下载后查看完整内容。';
+    } else {
+        el.textContent = '文件较大（' + total + '），仅预览前 1 MB。点击编辑可加载完整内容。';
+    }
+    return el;
+}
+
+function buildTextarea(value) {
+    const ta = document.createElement('textarea');
+    ta.className = 'editor-textarea';
+    ta.id = 'editorTextarea';
+    ta.value = value;
+    return ta;
+}
+
+async function toggleEdit() {
+    if (!previewState) return;
+    if (previewState.editing) {
+        closeEditMode();
+        return;
+    }
+
+    // Refuse on size as well as hiding the button, so a keyboard shortcut or a
+    // stale button state cannot reach the editor for a file it cannot hold.
+    if (previewState.size > EDIT_LIMIT) {
+        showToast('文件超过 32 MB，无法在线编辑，请下载后修改', 'error');
+        return;
+    }
+
+    // The preview holds only the first 1 MB. Editing needs the whole file, so
+    // fetch it here, on demand, rather than paying that cost on every open.
+    if (previewState.truncated) {
+        const btn = document.getElementById('previewEditBtn');
+        btn.style.display = 'none';
+        try {
+            const data = await api(`/api/file?path=${encodeURIComponent(previewState.path)}&full=1`);
+            if (!previewState) return;
+            previewState.content = (data.data && data.data.content) || '';
+            previewState.truncated = false;
+        } catch (err) {
+            if (!previewState) return;
+            showToast('无法加载完整内容: ' + err.message, 'error');
+            syncEditButton();
+            return;
+        }
+    }
+
+    previewState.editing = true;
+    document.getElementById('previewEditBtn').style.display = 'none';
+    document.getElementById('previewFooter').style.display = '';
+    renderPreviewBody();
+    const ta = document.getElementById('editorTextarea');
+    if (ta) ta.focus();
+}
+
+function closeEditMode() {
+    if (!previewState) return;
+    previewState.editing = false;
+    syncEditButton();
+    document.getElementById('previewFooter').style.display = 'none';
+    renderPreviewBody();
+}
+
+async function saveEdit() {
+    if (!previewState || !previewState.editing) return;
+    // Final guard on the destructive path: writing a prefix back to disk
+    // would silently drop every byte past textPreviewLimit.
+    if (previewState.truncated) {
+        showToast('文件过大，仅预览了前 1 MB，无法保存', 'error');
+        return;
+    }
+    const ta = document.getElementById('editorTextarea');
+    if (!ta) return;
+
+    // The full file path is split here rather than trusted from the listing:
+    // the previous editor saved to the *current directory* plus the basename,
+    // which reset the file whenever the name cell was clicked, because that
+    // path was the directory itself.
+    const fullPath = previewState.path;
+    const dir = getParentPath(fullPath);
+    const base = fullPath.split('/').pop();
+    const content = ta.value;
+
     try {
         await api('/api/create-file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path: currentPath,
-                name: editingFilePath.split('/').pop(),
-                content: content
-            })
+            body: JSON.stringify({ path: dir, name: base, content })
         });
+        previewState.content = content;
+        previewState.editing = false;
+        syncEditButton();
+        document.getElementById('previewFooter').style.display = 'none';
+        renderPreviewBody();
         showToast('保存成功');
-        closeEditor();
         await loadFiles();
     } catch (err) {
         showToast('保存失败: ' + err.message, 'error');
     }
+}
+
+// ===== Minimal Markdown renderer =====
+// Deliberately dependency-free: the whole point of this project is one small
+// binary. Source text is HTML-escaped *before* any markup is produced, so a
+// document cannot inject elements; only the tags built below reach innerHTML.
+function renderMarkdown(src) {
+    const esc = function (s) {
+        return s.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+    };
+
+    const inline = function (s) {
+        return esc(s)
+            .replace(/\x60([^\x60]+)\x60/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+            .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+            .replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, function (m, text, href) {
+                // Only schemes that cannot execute script become links. Anything
+                // else (javascript:, data:, a relative path) is left as literal
+                // text, so a document can never smuggle in an active URL.
+                if (!/^(https?:|mailto:|#)/i.test(href)) return m;
+                return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+            });
+    };
+
+    const lines = src.replace(/\r\n?/g, '\n').split('\n');
+    const out = [];
+    let i = 0;
+    let listType = null;
+
+    const closeList = function () { if (listType) { out.push('</' + listType + '>'); listType = null; } };
+    const openList = function (t) { if (listType !== t) { closeList(); out.push('<' + t + '>'); listType = t; } };
+
+    while (i < lines.length) {
+        const line = lines[i];
+
+        // Fenced code block
+        const fence = line.match(/^\s*\x60\x60\x60(.*)$/);
+        if (fence) {
+            closeList();
+            const lang = fence[1].trim();
+            const buf = [];
+            i++;
+            while (i < lines.length && !/^\s*\x60\x60\x60\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+            i++; // consume the closing fence
+            out.push('<pre class="md-code"><code' +
+                     (lang ? ' class="lang-' + esc(lang) + '"' : '') + '>' +
+                     esc(buf.join('\n')) + '</code></pre>');
+            continue;
+        }
+
+        // Blank line
+        if (!line.trim()) { closeList(); i++; continue; }
+
+        // Horizontal rule
+        if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { closeList(); out.push('<hr>'); i++; continue; }
+
+        // Heading
+        const h = line.match(/^(#{1,6})\s+(.*)$/);
+        if (h) {
+            closeList();
+            const n = h[1].length;
+            out.push('<h' + n + '>' + inline(h[2]) + '</h' + n + '>');
+            i++;
+            continue;
+        }
+
+        // Blockquote
+        if (/^\s*>/.test(line)) {
+            closeList();
+            const buf = [];
+            while (i < lines.length && /^\s*>/.test(lines[i])) {
+                buf.push(lines[i].replace(/^\s*>\s?/, ''));
+                i++;
+            }
+            out.push('<blockquote>' + inline(buf.join(' ')) + '</blockquote>');
+            continue;
+        }
+
+        // Table: a header row followed by a separator row
+        if (/\|/.test(line) && i + 1 < lines.length &&
+            /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
+            closeList();
+            const cells = function (row) {
+                return row.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|')
+                          .map(function (c) { return c.trim(); });
+            };
+            const head = cells(line);
+            i += 2;
+            const rows = [];
+            while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim()) {
+                rows.push(cells(lines[i]));
+                i++;
+            }
+            let html = '<table class="md-table"><thead><tr>' +
+                       head.map(function (c) { return '<th>' + inline(c) + '</th>'; }).join('') +
+                       '</tr></thead><tbody>';
+            html += rows.map(function (r) {
+                return '<tr>' + r.map(function (c) { return '<td>' + inline(c) + '</td>'; }).join('') + '</tr>';
+            }).join('');
+            out.push(html + '</tbody></table>');
+            continue;
+        }
+
+        // Unordered list
+        const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+        if (ul) { openList('ul'); out.push('<li>' + inline(ul[1]) + '</li>'); i++; continue; }
+
+        // Ordered list
+        const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        if (ol) { openList('ol'); out.push('<li>' + inline(ol[1]) + '</li>'); i++; continue; }
+
+        // Paragraph: gather until a blank line or another block starter
+        closeList();
+        const buf = [line];
+        i++;
+        while (i < lines.length && lines[i].trim() &&
+               !/^\s*(\x60\x60\x60|>|#{1,6}\s|[-*+]\s|\d+[.)]\s)/.test(lines[i])) {
+            buf.push(lines[i]);
+            i++;
+        }
+        out.push('<p>' + inline(buf.join('\n')).replace(/\n/g, '<br>') + '</p>');
+    }
+
+    closeList();
+    return out.join('\n');
 }
 
 // ===== Upload =====
@@ -636,10 +1015,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') document.getElementById('confirmNewFileBtn').click();
     });
     
-    // Editor
-    document.getElementById('closeEditorBtn').onclick = closeEditor;
-    document.getElementById('cancelEditorBtn').onclick = closeEditor;
-    document.getElementById('saveEditorBtn').onclick = saveEditor;
+    // Preview
+    document.getElementById('previewCloseBtn').onclick = closePreview;
+    document.getElementById('previewBackdrop').onclick = closePreview;
+    document.getElementById('previewEditBtn').onclick = toggleEdit;
+    document.getElementById('previewCancelEditBtn').onclick = closeEditMode;
+    document.getElementById('previewSaveEditBtn').onclick = saveEdit;
+    document.getElementById('previewOpenBtn').onclick = () => {
+        if (previewState) openInNewTab(previewState.path, true);
+    };
+    document.getElementById('previewDownloadBtn').onclick = () => {
+        if (previewState) downloadFile(previewState.path);
+    };
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const modal = document.getElementById('previewModal');
+        if (modal.style.display === 'none' || !previewState) return;
+        if (previewState.editing) closeEditMode();
+        else closePreview();
+    });
     
     // Search
     let searchTimer = null;
@@ -682,9 +1076,16 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's' && previewState && previewState.editing && !previewState.truncated) {
+            e.preventDefault();
+            saveEdit();
+            return;
+        }
         if (e.key === 'Escape') {
             document.querySelectorAll('.modal').forEach(m => {
-                if (m.style.display !== 'none' && m.id !== 'uploadModal') {
+                // previewModal and uploadModal manage their own state; hiding
+                // them here would drop the dirty-check and the upload list.
+                if (m.style.display !== 'none' && m.id !== 'uploadModal' && m.id !== 'previewModal') {
                     m.style.display = 'none';
                 }
             });

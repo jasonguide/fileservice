@@ -55,6 +55,7 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 			IsDir:        entry.IsDir(),
 			Size:         info.Size(),
 			LastModified: info.ModTime().UnixMilli(),
+			Preview:      previewKind(entry.Name()),
 		})
 	}
 
@@ -391,7 +392,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set Content-Disposition for download
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(absPath)+"\"")
+	w.Header().Set("Content-Disposition", contentDisposition("attachment", filepath.Base(absPath)))
 	http.ServeFile(w, r, absPath)
 }
 
@@ -568,23 +569,117 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	// For binary files, serve directly
 	contentType := detectContentType(absPath)
 	if strings.HasPrefix(contentType, "text/") || contentType == "application/json" || contentType == "application/javascript" {
-		content, err := os.ReadFile(absPath)
+		// ?full=1 asks for the whole file, which only the editor needs so that a
+		// save cannot silently drop the tail. Even then the read is bounded:
+		// past textEditLimit the request is refused rather than loaded, so no
+		// code path can pull an arbitrarily large file into memory.
+		full := r.URL.Query().Get("full") == "1"
+		size := info.Size()
+
+		// Reject on the stat result, before allocating anything. Reading up to
+		// the limit and only then checking costs a full textEditLimit buffer
+		// (32 MB) on every rejected request, which is exactly the allocation
+		// this endpoint exists to avoid.
+		if full && size > textEditLimit {
+			writeError(w, http.StatusRequestEntityTooLarge, "file is too large to edit (limit 32 MB), please download it")
+			return
+		}
+
+		limit := int64(textPreviewLimit)
+		if full {
+			limit = textEditLimit
+		}
+
+		head, err := readFileHead(absPath, size, limit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read file")
 			return
 		}
-		writeJSON(w, http.StatusOK, APIResponse{
-			Success: true,
-			Data: map[string]interface{}{
-				"name":    filepath.Base(absPath),
-				"content": string(content),
-				"type":    contentType,
-			},
-		})
+
+		truncated := int64(len(head)) < size
+		payload := map[string]interface{}{
+			"name":      filepath.Base(absPath),
+			"content":   string(head),
+			"type":      contentType,
+			"size":      size,
+			"truncated": truncated,
+		}
+		if truncated {
+			// Tell the caller what it is looking at so the UI can explain the
+			// difference between "this is the file" and "this is the start of it".
+			payload["previewLimit"] = limit
+		}
+		writeJSON(w, http.StatusOK, APIResponse{Success: true, Data: payload})
 		return
 	}
 
 	// For binary/image files, serve directly for preview
+	http.ServeFile(w, r, absPath)
+}
+
+// handlePreview serves a file inline so the browser can render it in place.
+//
+// Only extensions in previewTypes are served; everything else is refused with
+// 415 so an unknown type is never handed to the browser inline. The response
+// body itself comes from http.ServeFile, which supplies Range support (video
+// and audio scrubbing) and conditional requests for free.
+func handlePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" && r.Method != "HEAD" {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userPath := r.URL.Query().Get("path")
+	if userPath == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	absPath, err := safePath(userPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to stat file")
+		return
+	}
+	if info.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is a directory")
+		return
+	}
+
+	pt, ok := previewTypeOf(absPath)
+	if !ok {
+		writeError(w, http.StatusUnsupportedMediaType, "file type is not previewable")
+		return
+	}
+
+	// ServeFile consults the extension to pick its own Content-Type when the
+	// header is unset, so it must be set here, before the call.
+	w.Header().Set("Content-Type", pt.Mime)
+	w.Header().Set("Content-Disposition", contentDisposition("inline", filepath.Base(absPath)))
+	// Never let a sniffed type override the whitelist decision above.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// SVG and HTML are executable when rendered as a same-origin document: a
+	// crafted file could call the API with the viewer's session. Before serving
+	// them inline, strip that ability with a sandboxing CSP. The blank
+	// sandbox value means "allow nothing"; everything the renderer needs is
+	// inlined in the file itself, so no directive has to be re-enabled.
+	//
+	// The PDF viewer additionally runs its own JS, so PDFs are sandboxed too.
+	if pt.Kind == "svg" || pt.Kind == "html" || pt.Kind == "pdf" {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+	}
+
 	http.ServeFile(w, r, absPath)
 }
 

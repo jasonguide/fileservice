@@ -51,6 +51,7 @@ func main() {
 	mux.HandleFunc("/api/mkdir", handleMkdir)
 	mux.HandleFunc("/api/create-file", handleCreateFile)
 	mux.HandleFunc("/api/file", handleFile)
+	mux.HandleFunc("/api/preview", handlePreview)
 	mux.HandleFunc("/api/rename", handleRename)
 
 	// Serve embedded static files
@@ -91,11 +92,6 @@ func withCORS(next http.Handler) http.Handler {
 // Middleware: request logging
 func withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip logging static file requests
-		if r.URL.Path != "/" && filepath.Ext(r.URL.Path) != "" && r.URL.Path[:4] == "/st" {
-			next.ServeHTTP(w, r)
-			return
-		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -4,6 +4,7 @@ fileservice.exe
 
 # Test data
 testdata/
+data/
 
 # IDE
 .idea/
