@@ -232,8 +232,9 @@ body {
 }
 
 /* Column widths - th and td both right-aligned for size/actions */
+.col-select   { width: 36px; }
 .col-name     { width: 40%; }
-.col-modified { width: 25%; }
+.col-modified { width: 24%; }
 .col-size     { width: 12%; }
 .col-actions  { width: 23%; }
 
@@ -315,6 +316,27 @@ body {
     text-align: right;
 }
 
+/* ===== Row selection ===== */
+.file-table th.col-select,
+.file-table td.col-select {
+    width: 36px;
+    padding-left: 12px;
+    padding-right: 0;
+    text-align: left;
+}
+
+.file-table input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: var(--blue);
+    vertical-align: middle;
+}
+
+.file-table tbody tr.selected {
+    background: rgba(0, 113, 227, 0.06);
+}
+
 /* ===== Row Actions ===== */
 .row-actions {
     display: flex;
@@ -332,6 +354,15 @@ body {
 
 .row-actions .icon-btn:hover {
     color: var(--blue);
+}
+
+.toolbar-right .icon-btn.danger:hover {
+    color: var(--red);
+}
+
+.toolbar-right .icon-btn.danger:disabled {
+    opacity: 0.45;
+    cursor: default;
 }
 
 .row-actions .icon-btn.danger:hover {
@@ -953,6 +984,9 @@ body.drag-over::after {
     /* Show all columns, make table scrollable */
     .file-table-container { overflow-x: auto; }
     .file-table { min-width: 480px; }
+    .col-select { width: 30px; }
+    .file-table th.col-select,
+    .file-table td.col-select { width: 30px; padding-left: 8px; }
     .col-name { width: 35%; }
     .col-modified { width: 22%; }
     .col-size { width: 15%; }

@@ -9,6 +9,10 @@ let allFiles = [];
 let pageSize = 20;
 let currentPage = 1;
 const PAGE_SIZES = [10, 20, 50, 100];
+// Selected entries are keyed by full path, not by row, so a selection
+// survives paging and search. Only paths still present in the current
+// directory are ever acted on; navigateTo clears the set.
+let selectedPaths = new Set();
 
 // ===== API Helper =====
 async function api(url, options = {}) {
@@ -170,13 +174,35 @@ function renderTable() {
         emptyState.style.display = 'flex';
         emptyState.querySelector('p').textContent = searchQuery ? '未找到匹配的文件' : '此文件夹为空';
         renderPager(0, 1, searchQuery);
+        syncSelectionUi();
         return;
     }
     emptyState.style.display = 'none';
 
     pageItems.forEach(file => {
         const tr = document.createElement('tr');
-        
+        const fullPath = joinPath(currentPath, file.name);
+
+        // Select cell
+        const selectTd = document.createElement('td');
+        selectTd.className = 'col-select';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'row-select';
+        cb.checked = selectedPaths.has(fullPath);
+        if (cb.checked) tr.classList.add('selected');
+        cb.title = '选中 ' + file.name;
+        cb.dataset.path = fullPath; // authoritative path; never re-derive from text
+        cb.onclick = (e) => e.stopPropagation();
+        cb.onchange = () => {
+            if (cb.checked) selectedPaths.add(fullPath);
+            else selectedPaths.delete(fullPath);
+            tr.classList.toggle('selected', cb.checked);
+            syncSelectionUi();
+        };
+        selectTd.appendChild(cb);
+        tr.appendChild(selectTd);
+
         // Name cell
         const nameTd = document.createElement('td');
         const nameDiv = document.createElement('div');
@@ -214,7 +240,6 @@ function renderTable() {
         actionsDiv.className = 'row-actions';
 
         if (!file.isDir) {
-            const fullPath = joinPath(currentPath, file.name);
 
             // Preview (only for whitelisted types; the backend reports which)
             if (file.preview) {
@@ -258,6 +283,7 @@ function renderTable() {
     });
 
     renderPager(totalItems, totalPages, searchQuery);
+    syncSelectionUi();
 
     // Update sort indicators
     document.querySelectorAll('.sortable').forEach(th => {
@@ -333,6 +359,7 @@ function getParentPath(path) {
 async function navigateTo(path) {
     currentPath = path || '/';
     currentPage = 1; // a new directory starts at its first page
+    selectedPaths.clear(); // selections do not follow you between folders
     await loadFiles();
 }
 
@@ -380,11 +407,71 @@ async function deleteItem(path, name) {
     if (!confirm(`确定删除 "${name}" 吗？`)) return;
     try {
         await api(`/api/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        selectedPaths.delete(path);
         showToast('已删除: ' + name);
         await loadFiles();
     } catch (err) {
         showToast('删除失败: ' + err.message, 'error');
     }
+}
+
+// ===== Batch delete =====
+// Deletes the selected paths one by one through the existing single-path
+// endpoint, so no backend change is needed. Failures are collected rather than
+// aborting the run: one permission error should not strand the other deletions.
+async function deleteSelected() {
+    const paths = Array.from(selectedPaths);
+    if (paths.length === 0) return;
+
+    const names = paths.map(p => p.split('/').pop());
+    const preview = names.slice(0, 5).join('、') + (names.length > 5 ? ` 等 ${names.length} 项` : '');
+    if (!confirm(`确定删除选中的 ${paths.length} 项吗？\n\n${preview}`)) return;
+
+    const btn = document.getElementById('batchDeleteBtn');
+    btn.disabled = true;
+    showToast(`正在删除 0/${paths.length}...`);
+
+    const failed = [];
+    let done = 0;
+    for (const p of paths) {
+        try {
+            await api(`/api/delete?path=${encodeURIComponent(p)}`, { method: 'DELETE' });
+            selectedPaths.delete(p);
+        } catch (err) {
+            failed.push(p.split('/').pop() + '（' + err.message + '）');
+        }
+        done++;
+        showToast(`正在删除 ${done}/${paths.length}...`);
+    }
+
+    btn.disabled = false;
+    await loadFiles();
+
+    if (failed.length === 0) {
+        showToast(`已删除 ${paths.length} 项`);
+    } else {
+        showToast(`已删除 ${paths.length - failed.length} 项，${failed.length} 项失败：` + failed.join('；'), 'error');
+    }
+}
+
+// Keeps the header checkbox and the batch button in step with the selection.
+// The header box reflects only the rows currently rendered, so it reads as
+// "all items on this page" rather than "all items in the folder".
+function syncSelectionUi() {
+    const boxes = Array.from(document.querySelectorAll('.row-select'));
+    const checkedOnPage = boxes.filter(b => b.checked).length;
+
+    const selectAll = document.getElementById('selectAllCheckbox');
+    if (selectAll) {
+        selectAll.checked = boxes.length > 0 && checkedOnPage === boxes.length;
+        selectAll.indeterminate = checkedOnPage > 0 && checkedOnPage < boxes.length;
+        selectAll.disabled = boxes.length === 0;
+    }
+
+    const btn = document.getElementById('batchDeleteBtn');
+    const count = selectedPaths.size;
+    btn.style.display = count > 0 ? '' : 'none';
+    btn.title = count > 0 ? `删除选中的 ${count} 项` : '删除选中';
 }
 
 // ===== Preview =====
@@ -1019,6 +1106,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('homeBtn').onclick = () => navigateTo('/');
     document.getElementById('backBtn').onclick = () => navigateTo(getParentPath(currentPath));
     document.getElementById('refreshBtn').onclick = () => loadFiles();
+
+    // Batch selection: the header box toggles only the rows on screen.
+    document.getElementById('selectAllCheckbox').onchange = (e) => {
+        const boxes = Array.from(document.querySelectorAll('.row-select'));
+        boxes.forEach((cb) => {
+            const fullPath = cb.dataset.path;
+            cb.checked = e.target.checked;
+            cb.closest('tr').classList.toggle('selected', e.target.checked);
+            if (e.target.checked) selectedPaths.add(fullPath);
+            else selectedPaths.delete(fullPath);
+        });
+        syncSelectionUi();
+    };
+    document.getElementById('batchDeleteBtn').onclick = deleteSelected;
     
     // Upload
     document.getElementById('uploadBtn').onclick = () => {
