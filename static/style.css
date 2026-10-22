@@ -373,6 +373,15 @@ body {
     gap: 8px;
 }
 
+/* Page buttons + page number. Hidden on a single page so the size selector
+   is never hidden along with them (that would strand the user on a page size
+   they cannot change back). */
+.pager-pages {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .pager-size {
     padding: 4px 6px;
     font-size: 12px;
@@ -983,6 +992,7 @@ body.drag-over::after {
     .pager { padding: 6px 8px; gap: 8px; }
     .pager-info { font-size: 11px; }
     .pager-controls { gap: 6px; }
+    .pager-pages { gap: 6px; }
     .pager-btn { padding: 4px 8px; font-size: 11px; }
     .pager-size { font-size: 11px; padding: 3px 4px; }
     .pager-current { font-size: 11px; min-width: 44px; }

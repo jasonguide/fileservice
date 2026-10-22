@@ -271,37 +271,50 @@ function renderTable() {
 
 // Renders the pager. While searching, pagination is suppressed entirely: the
 // whole match set is on screen, so showing page controls would be misleading.
+// Renders the pager.
+//
+// The page controls stay visible even when everything fits on one page, with
+// both buttons disabled and the counter reading 1 / 1. Hiding them made a small
+// folder indistinguishable from a broken pager, and hiding the whole control
+// block (an earlier bug) also took the page-size selector with it, stranding the
+// user on a size they could not change back. Only search hides the page numbers,
+// because then every match is on screen and pagination genuinely does not apply.
 function renderPager(totalItems, totalPages, searching) {
     const pager = document.getElementById('pager');
     const info = document.getElementById('pagerInfo');
-    const controls = document.querySelector('.pager-controls');
+    const pages = document.getElementById('pagerPages');
+    const prev = document.getElementById('prevPageBtn');
+    const next = document.getElementById('nextPageBtn');
+    const current = document.getElementById('pagerCurrent');
+
+    pager.style.display = 'flex';
 
     if (searching) {
-        // Every match is on screen, so the page controls are removed rather
-        // than left showing a page number that no longer means anything.
-        pager.style.display = 'flex';
-        controls.style.display = 'none';
+        // Every match is on screen, so page numbers would be meaningless; the
+        // size selector stays so the preference can still be changed.
+        pages.style.display = 'none';
         info.textContent = '搜索到 ' + totalItems + ' 项（不受分页限制）';
         return;
     }
 
+    pages.style.display = 'inline-flex';
+
     if (totalItems <= pageSize) {
-        // Everything fits on one page: no page numbers are needed, but the
-        // size selector stays reachable so the page size can still be changed.
-        pager.style.display = 'flex';
-        controls.style.display = 'none';
+        // Single page: show the controls in a disabled state rather than
+        // removing them, so the bottom bar always looks the same.
         info.textContent = '共 ' + totalItems + ' 项';
+        current.textContent = '1 / 1';
+        prev.disabled = true;
+        next.disabled = true;
         return;
     }
 
-    pager.style.display = 'flex';
-    controls.style.display = 'flex';
     const from = (currentPage - 1) * pageSize + 1;
     const to = Math.min(currentPage * pageSize, totalItems);
     info.textContent = '共 ' + totalItems + ' 项，显示 ' + from + '-' + to;
-    document.getElementById('pagerCurrent').textContent = currentPage + ' / ' + totalPages;
-    document.getElementById('prevPageBtn').disabled = currentPage <= 1;
-    document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+    current.textContent = currentPage + ' / ' + totalPages;
+    prev.disabled = currentPage <= 1;
+    next.disabled = currentPage >= totalPages;
 }
 
 // ===== Navigation =====
