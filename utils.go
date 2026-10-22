@@ -154,6 +154,9 @@ var previewTypes = map[string]previewType{
 	// Plain text and source code
 	"txt":        {"text", "text/plain; charset=utf-8"},
 	"log":        {"text", "text/plain; charset=utf-8"},
+	// Subtitle files are plain text; srt is listed because it is the format NAS
+	// media users actually drop next to a video and want to eyeball.
+	"srt":        {"text", "text/plain; charset=utf-8"},
 	"csv":        {"text", "text/plain; charset=utf-8"},
 	"tsv":        {"text", "text/plain; charset=utf-8"},
 	"json":       {"text", "text/plain; charset=utf-8"},

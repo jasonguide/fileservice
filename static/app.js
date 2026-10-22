@@ -3,6 +3,12 @@ let currentPath = '/';
 let sortKey = 'name';
 let sortDir = 'asc';
 let allFiles = [];
+// Pagination only applies to the plain listing. While a search is active the
+// filtered result is shown whole, because search is meant to span everything
+// in the directory rather than just the current page.
+let pageSize = 20;
+let currentPage = 1;
+const PAGE_SIZES = [10, 20, 50, 100];
 
 // ===== API Helper =====
 async function api(url, options = {}) {
@@ -33,7 +39,7 @@ function getFileIcon(name, isDir) {
     if (['mp4','avi','mkv','mov','wmv','flv','webm'].includes(ext)) return FILE_ICONS.video;
     if (['mp3','wav','flac','aac','ogg','m4a'].includes(ext)) return FILE_ICONS.audio;
     if (['js','ts','jsx','tsx','go','py','java','c','cpp','rs','html','css','json','xml','sh','yml','yaml','toml','vue','php'].includes(ext)) return FILE_ICONS.code;
-    if (['txt','md','log','csv','rtf','doc','docx'].includes(ext)) return FILE_ICONS.text;
+    if (['txt','md','log','csv','rtf','doc','docx','srt'].includes(ext)) return FILE_ICONS.text;
     if (['zip','rar','7z','tar','gz','bz2','xz'].includes(ext)) return FILE_ICONS.archive;
     return FILE_ICONS.file;
 }
@@ -109,23 +115,24 @@ function renderBreadcrumb() {
     backBtn.style.display = (currentPath === '/') ? 'none' : 'inline-flex';
 }
 
-function renderTable() {
-    const tbody = document.getElementById('fileTableBody');
-    const emptyState = document.getElementById('emptyState');
-    tbody.innerHTML = '';
+function getSearchQuery() {
+    return document.getElementById('searchInput').value.trim().toLowerCase();
+}
 
-    // Apply search filter
-    const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+// Filtering and sorting live here so the table and the pager always agree on
+// what the current result set is. Search covers the whole listing, never just
+// the current page, which is what makes a match on page 5 findable from page 1.
+function getVisibleFiles() {
+    const searchQuery = getSearchQuery();
     let files = allFiles;
     if (searchQuery) {
         files = files.filter(f => f.name.toLowerCase().includes(searchQuery));
     }
 
-    // Apply sorting
     files = [...files].sort((a, b) => {
         // Directories always first
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        
+
         let valA, valB;
         switch (sortKey) {
             case 'name': valA = a.name.toLowerCase(); valB = b.name.toLowerCase(); break;
@@ -133,19 +140,41 @@ function renderTable() {
             case 'size': valA = a.size || 0; valB = b.size || 0; break;
             default: return 0;
         }
-        
+
         if (valA < valB) return sortDir === 'asc' ? -1 : 1;
         if (valA > valB) return sortDir === 'asc' ? 1 : -1;
         return 0;
     });
+    return files;
+}
 
-    if (files.length === 0) {
+function renderTable() {
+    const tbody = document.getElementById('fileTableBody');
+    const emptyState = document.getElementById('emptyState');
+    tbody.innerHTML = '';
+
+    const searchQuery = getSearchQuery();
+    const files = getVisibleFiles();
+
+    // Pagination is applied after filtering and sorting, so page 1 always
+    // holds the first item of the sorted result rather than of the raw list.
+    const totalItems = files.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const pageStart = (currentPage - 1) * pageSize;
+    const pageItems = searchQuery ? files : files.slice(pageStart, pageStart + pageSize);
+
+    if (totalItems === 0) {
         emptyState.style.display = 'flex';
+        emptyState.querySelector('p').textContent = searchQuery ? '未找到匹配的文件' : '此文件夹为空';
+        renderPager(0, 1, searchQuery);
         return;
     }
     emptyState.style.display = 'none';
 
-    files.forEach(file => {
+    pageItems.forEach(file => {
         const tr = document.createElement('tr');
         
         // Name cell
@@ -228,6 +257,8 @@ function renderTable() {
         tbody.appendChild(tr);
     });
 
+    renderPager(totalItems, totalPages, searchQuery);
+
     // Update sort indicators
     document.querySelectorAll('.sortable').forEach(th => {
         const arrow = th.querySelector('.sort-arrow');
@@ -236,6 +267,41 @@ function renderTable() {
             arrow.classList.add(sortDir);
         }
     });
+}
+
+// Renders the pager. While searching, pagination is suppressed entirely: the
+// whole match set is on screen, so showing page controls would be misleading.
+function renderPager(totalItems, totalPages, searching) {
+    const pager = document.getElementById('pager');
+    const info = document.getElementById('pagerInfo');
+    const controls = document.querySelector('.pager-controls');
+
+    if (searching) {
+        // Every match is on screen, so the page controls are removed rather
+        // than left showing a page number that no longer means anything.
+        pager.style.display = 'flex';
+        controls.style.display = 'none';
+        info.textContent = '搜索到 ' + totalItems + ' 项（不受分页限制）';
+        return;
+    }
+
+    if (totalItems <= pageSize) {
+        // Everything fits on one page: no page numbers are needed, but the
+        // size selector stays reachable so the page size can still be changed.
+        pager.style.display = 'flex';
+        controls.style.display = 'none';
+        info.textContent = '共 ' + totalItems + ' 项';
+        return;
+    }
+
+    pager.style.display = 'flex';
+    controls.style.display = 'flex';
+    const from = (currentPage - 1) * pageSize + 1;
+    const to = Math.min(currentPage * pageSize, totalItems);
+    info.textContent = '共 ' + totalItems + ' 项，显示 ' + from + '-' + to;
+    document.getElementById('pagerCurrent').textContent = currentPage + ' / ' + totalPages;
+    document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+    document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
 }
 
 // ===== Navigation =====
@@ -253,6 +319,7 @@ function getParentPath(path) {
 
 async function navigateTo(path) {
     currentPath = path || '/';
+    currentPage = 1; // a new directory starts at its first page
     await loadFiles();
 }
 
@@ -1039,7 +1106,32 @@ document.addEventListener('DOMContentLoaded', () => {
     let searchTimer = null;
     document.getElementById('searchInput').oninput = () => {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => renderTable(), 200);
+        searchTimer = setTimeout(() => {
+            currentPage = 1; // results are shown whole, start from the top
+            renderTable();
+        }, 200);
+    };
+
+    // Pagination
+    document.getElementById('pageSizeSelect').onchange = (e) => {
+        const size = parseInt(e.target.value, 10);
+        if (!PAGE_SIZES.includes(size)) return;
+        pageSize = size;
+        currentPage = 1;
+        renderTable();
+    };
+    document.getElementById('prevPageBtn').onclick = () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderTable();
+        }
+    };
+    document.getElementById('nextPageBtn').onclick = () => {
+        const totalPages = Math.max(1, Math.ceil(getVisibleFiles().length / pageSize));
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderTable();
+        }
     };
     
     // Sorting
@@ -1052,6 +1144,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 sortKey = key;
                 sortDir = 'asc';
             }
+            currentPage = 1; // re-sorted list starts at the first page
             renderTable();
         };
     });

@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FileService</title>
+    <link rel="icon" type="image/png" href="/icons.png">
+    <link rel="apple-touch-icon" href="/icons.png">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -58,10 +60,27 @@
             </div>
         </main>
 
+        <!-- Pagination. Hidden while a search is active: search always covers
+             the whole listing, so the pager has nothing to page. -->
+        <div class="pager" id="pager" style="display:none;">
+            <div class="pager-info" id="pagerInfo"></div>
+            <div class="pager-controls">
+                <select class="pager-size" id="pageSizeSelect" title="每页条数">
+                    <option value="10">10</option>
+                    <option value="20" selected>20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <button class="pager-btn" id="prevPageBtn" title="上一页">上一页</button>
+                <span class="pager-current" id="pagerCurrent"></span>
+                <button class="pager-btn" id="nextPageBtn" title="下一页">下一页</button>
+            </div>
+        </div>
+
         <!-- Version footer. The version number is a plain literal so it can be
              edited right here when needed; nothing else reads or reports it. -->
         <footer class="app-footer">
-            <span class="app-version">版本: 1.0.2</span>
+            <span class="app-version">版本: 1.0.3</span>
         </footer>
 
         <!-- Upload Progress Modal -->

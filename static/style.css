@@ -29,12 +29,16 @@ body {
 }
 
 #app {
-    min-height: 100vh;
+    /* Fixed viewport height, not min-height: the toolbar, pager and version
+       bar must stay pinned while the table scrolls inside the middle row.
+       With min-height the table simply grew and pushed the pager off screen. */
+    height: 100vh;
     display: flex;
     flex-direction: column;
     max-width: 1200px;
     margin: 0 auto;
     width: 100%;
+    overflow: hidden;
 }
 
 /* ===== Toolbar ===== */
@@ -161,7 +165,10 @@ body {
 
 /* ===== File Table ===== */
 .file-table-container {
-    flex: 1;
+    flex: 1 1 auto;
+    /* Without min-height:0 a flex item refuses to shrink below its content,
+       which is what let the table push the pager out of the viewport. */
+    min-height: 0;
     overflow: auto;
     background: var(--surface);
 }
@@ -339,6 +346,75 @@ body {
     padding: 80px 20px;
     color: var(--text3);
     font-size: 14px;
+}
+
+/* ===== Pagination ===== */
+.pager {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-light);
+    flex-wrap: wrap;
+}
+
+.pager-info {
+    font-size: 12px;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+}
+
+.pager-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pager-size {
+    padding: 4px 6px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+}
+
+.pager-size:focus {
+    border-color: var(--blue);
+}
+
+.pager-btn {
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.pager-btn:hover:not(:disabled) {
+    color: var(--blue);
+    border-color: var(--blue);
+}
+
+.pager-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.pager-current {
+    font-size: 12px;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+    min-width: 52px;
+    text-align: center;
 }
 
 /* ===== Version footer ===== */
@@ -903,4 +979,11 @@ body.drag-over::after {
     .preview-body .editor-textarea { font-size: 12px; }
     .preview-footer { padding: 10px 14px; }
     .preview-truncated { padding: 8px 12px; font-size: 12px; }
+    /* Pagination: keep it on one row but tighten spacing */
+    .pager { padding: 6px 8px; gap: 8px; }
+    .pager-info { font-size: 11px; }
+    .pager-controls { gap: 6px; }
+    .pager-btn { padding: 4px 8px; font-size: 11px; }
+    .pager-size { font-size: 11px; padding: 3px 4px; }
+    .pager-current { font-size: 11px; min-width: 44px; }
 }
