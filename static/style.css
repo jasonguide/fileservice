@@ -253,9 +253,12 @@ body {
     text-overflow: ellipsis;
 }
 
-/* Right-align size and actions columns */
-.file-table td:nth-child(3),
-.file-table td:nth-child(4) {
+/* Right-align size and actions columns.
+   Selected by class, not nth-child: the column list gained a select column,
+   and positional selectors silently re-targeted the wrong cell (the date
+   column was being right-aligned as if it were Size). */
+.file-table td.file-size,
+.file-table td.col-actions {
     text-align: right;
 }
 

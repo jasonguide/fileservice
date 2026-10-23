@@ -236,6 +236,7 @@ function renderTable() {
 
         // Actions cell
         const actionsTd = document.createElement('td');
+        actionsTd.className = 'col-actions';
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'row-actions';
 
