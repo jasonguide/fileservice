@@ -47,6 +47,7 @@ func main() {
 	mux.HandleFunc("/api/upload/complete", handleUploadComplete)
 	mux.HandleFunc("/api/upload/cancel", handleUploadCancel)
 	mux.HandleFunc("/api/download", handleDownload)
+	mux.HandleFunc("/api/download-batch", handleDownloadBatch)
 	mux.HandleFunc("/api/delete", handleDelete)
 	mux.HandleFunc("/api/mkdir", handleMkdir)
 	mux.HandleFunc("/api/create-file", handleCreateFile)

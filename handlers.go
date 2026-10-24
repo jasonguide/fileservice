@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"io"
 	"log"
@@ -681,6 +682,172 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, absPath)
+}
+
+// handleDownloadBatch streams the requested paths into a single zip archive.
+//
+// Downloading several files one by one cannot work in a browser: folders are
+// refused by /api/download and browsers silently drop all but the first of a
+// burst of programmatic downloads. Zipping server-side is the only way a
+// selection can arrive as one artifact.
+//
+// The archive is written straight to the response, so memory stays flat
+// regardless of how much is selected -- the same constraint the rest of this
+// service follows.
+func handleDownloadBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" && r.Method != "POST" {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Accept both repeated ?path= params and a JSON body {paths: [...]}, so the
+	// caller is not forced into one shape when a path contains characters that
+	// are awkward to repeat in a query string.
+	var paths []string
+	paths = append(paths, r.URL.Query()["path"]...)
+	if len(paths) == 0 {
+		var req struct {
+			Paths []string `json:"paths"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			paths = append(paths, req.Paths...)
+		}
+	}
+
+	// Drop empties and de-duplicate: a repeated selection must not appear twice
+	// in the archive, which would also make zip entry names collide.
+	seen := make(map[string]bool, len(paths))
+	unique := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		unique = append(unique, p)
+	}
+	if len(unique) == 0 {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	// Resolve and validate everything before writing any output, so a bad path
+	// fails the request instead of producing a truncated archive.
+	type item struct {
+		abs  string
+		name string
+		isDir bool
+	}
+	items := make([]item, 0, len(unique))
+	for _, p := range unique {
+		abs, err := safePath(p)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid path")
+			return
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeError(w, http.StatusNotFound, "not found: "+filepath.Base(abs))
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to stat file")
+			return
+		}
+		// Never let the data root itself be zipped: that would package the whole
+		// store into one response.
+		if abs == config.DataDir {
+			writeError(w, http.StatusBadRequest, "cannot download root directory")
+			return
+		}
+		items = append(items, item{abs: abs, name: filepath.Base(abs), isDir: info.IsDir()})
+	}
+
+	archiveName := "files.zip"
+	if len(items) == 1 {
+		archiveName = items[0].name
+		if !items[0].isDir {
+			archiveName = strings.TrimSuffix(archiveName, filepath.Ext(archiveName))
+		}
+		archiveName += ".zip"
+	}
+
+	// Headers must be set before the first byte of the body is written.
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", contentDisposition("attachment", archiveName))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	for _, it := range items {
+		if it.isDir {
+			// A directory is stored under a single top-level folder so that
+			// selecting several folders cannot interleave their contents.
+			writeZipDir(zw, it.abs, it.name)
+			continue
+		}
+		if err := writeZipFile(zw, it.abs, it.name); err != nil {
+			// The response is already streaming, so the failure can only be
+			// recorded in the archive itself, not reported as an HTTP error.
+			log.Printf("batch download: failed to add %s: %v", it.abs, err)
+			return
+		}
+	}
+}
+
+// writeZipFile streams one file into the archive under the given entry name.
+func writeZipFile(zw *zip.Writer, absPath, entryName string) error {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	hdr, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	hdr.Name = filepath.ToSlash(entryName)
+	hdr.Method = zip.Deflate
+
+	entry, err := zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	// io.Copy keeps this bounded: the file is read in small chunks, never
+		// loaded whole.
+	_, err = io.Copy(entry, f)
+	return err
+}
+
+// writeZipDir walks a directory and adds every file under prefix/.
+func writeZipDir(zw *zip.Writer, absDir, prefix string) {
+	// WalkDir does not follow symlinks, which keeps a link cycle from turning
+	// into an infinite archive.
+	filepath.WalkDir(absDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("batch download: skipping %s: %v", path, err)
+			return nil // keep going; one unreadable entry should not abort the rest
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(absDir, path)
+		if err != nil {
+			return nil
+		}
+		entryName := filepath.ToSlash(filepath.Join(prefix, rel))
+		if err := writeZipFile(zw, path, entryName); err != nil {
+			log.Printf("batch download: failed to add %s: %v", path, err)
+			return nil
+		}
+		return nil
+	})
 }
 
 // handleRename renames a file or directory

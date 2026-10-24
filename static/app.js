@@ -416,6 +416,25 @@ async function deleteItem(path, name) {
     }
 }
 
+// ===== Batch download =====
+// The selection is sent to /api/download-batch and comes back as one zip.
+// Doing it in the browser is not an option: folders cannot be fetched through
+// /api/download at all, and a burst of programmatic downloads is silently
+// throttled to the first one.
+function downloadSelected() {
+    const paths = Array.from(selectedPaths);
+    if (paths.length === 0) return;
+
+    const query = paths.map(p => 'path=' + encodeURIComponent(p)).join('&');
+    const link = document.createElement('a');
+    link.href = '/api/download-batch?' + query;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`正在打包下载 ${paths.length} 项...`);
+}
+
 // ===== Batch delete =====
 // Deletes the selected paths one by one through the existing single-path
 // endpoint, so no backend change is needed. Failures are collected rather than
@@ -469,8 +488,13 @@ function syncSelectionUi() {
         selectAll.disabled = boxes.length === 0;
     }
 
-    const btn = document.getElementById('batchDeleteBtn');
     const count = selectedPaths.size;
+
+    const downloadBtn = document.getElementById('batchDownloadBtn');
+    downloadBtn.style.display = count > 0 ? '' : 'none';
+    downloadBtn.title = count > 0 ? `下载选中的 ${count} 项` : '下载选中';
+
+    const btn = document.getElementById('batchDeleteBtn');
     btn.style.display = count > 0 ? '' : 'none';
     btn.title = count > 0 ? `删除选中的 ${count} 项` : '删除选中';
 }
@@ -1120,6 +1144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         syncSelectionUi();
     };
+    document.getElementById('batchDownloadBtn').onclick = downloadSelected;
     document.getElementById('batchDeleteBtn').onclick = deleteSelected;
     
     // Upload
