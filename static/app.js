@@ -57,25 +57,23 @@ function formatSize(bytes) {
     return val.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
 }
 
+// Renders every timestamp the same way (YY/MM/DD).
+//
+// Relative labels (Today, Yesterday, Fri) used to fill the first week, which
+// made the column read as a mix of formats. A fixed numeric form keeps the
+// column scannable and sortable at a glance.
+//
+// Values are padded by hand rather than via toLocaleDateString: the locale
+// output is not guaranteed to use the same separators or digit count.
 function formatDate(timestamp) {
     if (!timestamp) return '—';
     const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now - date;
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
-    if (dateOnly.getTime() === today.getTime()) {
-        return 'Today ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    }
-    if (dateOnly.getTime() === today.getTime() - 86400000) {
-        return 'Yesterday';
-    }
-    if (diff < 7 * 86400000) {
-        const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        return days[date.getDay()];
-    }
-    return date.toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' });
+    if (isNaN(date.getTime())) return '—';
+
+    const yy = String(date.getFullYear() % 100).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yy}/${mm}/${dd}`;
 }
 
 // ===== Render =====
