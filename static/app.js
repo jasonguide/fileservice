@@ -222,13 +222,13 @@ function renderTable() {
 
         // Modified cell
         const modTd = document.createElement('td');
-        modTd.className = 'file-modified';
+        modTd.className = 'file-modified col-modified';
         modTd.textContent = formatDate(file.lastModified);
         tr.appendChild(modTd);
 
         // Size cell
         const sizeTd = document.createElement('td');
-        sizeTd.className = 'file-size';
+        sizeTd.className = 'file-size col-size';
         sizeTd.textContent = file.isDir ? '—' : formatSize(file.size);
         tr.appendChild(sizeTd);
 

@@ -963,8 +963,12 @@ body.drag-over::after {
 }
 
 /* ===== Responsive - Mobile ===== */
+/* Target phones and narrow windows. Below 768px the table drops the date and
+   size columns entirely: four columns cannot fit 390px, and horizontal
+   scrolling made the action buttons unreachable. Name takes the full width,
+   actions stay pinned right. */
 @media (max-width: 768px) {
-    /* Two-row layout: breadcrumb top, actions bottom */
+    /* Two-row toolbar: breadcrumb on top, actions below */
     .toolbar {
         flex-direction: column;
         height: auto;
@@ -984,33 +988,55 @@ body.drag-over::after {
     }
     .search-box { margin-left: 4px; }
     .search-box input { width: 60px; font-size: 12px; }
-    /* Show all columns, make table scrollable */
-    .file-table-container { overflow-x: auto; }
-    .file-table { min-width: 480px; }
-    .col-select { width: 30px; }
+
+    /* Table: no horizontal scroll. Date and size columns are removed from the
+       flow, not merely shrunk, so the name column owns the full row width. */
+    .file-table-container { overflow-x: hidden; }
+    .file-table { min-width: 0; width: 100%; }
+    .file-table th.col-modified,
+    .file-table td.col-modified,
+    .file-table td.file-modified,
+    .file-table th.col-size,
+    .file-table td.col-size,
+    .file-table td.file-size { display: none; }
+    .col-select { width: 34px; }
     .file-table th.col-select,
-    .file-table td.col-select { width: 30px; padding-left: 8px; }
-    .col-name { width: 35%; }
-    .col-modified { width: 22%; }
-    .col-size { width: 15%; }
-    .col-actions { width: 28%; }
+    .file-table td.col-select { width: 34px; padding-left: 10px; }
+    .col-name { width: auto; }
+    .col-actions { width: auto; }
     .file-table th,
-    .file-table td { padding: 8px 6px; font-size: 12px; }
-    .file-name-cell { gap: 6px; }
-    .row-actions .icon-btn { width: 28px; height: 28px; }
-    .row-actions .icon-btn svg { width: 14px; height: 14px; }
+    .file-table td { padding: 10px 8px; font-size: 13px; }
+    .file-name-cell { gap: 8px; }
+    .file-name { white-space: normal; word-break: break-all; }
+
+    /* Touch targets: 44px is the smallest comfortably tappable size. */
+    .row-select { width: 18px; height: 18px; }
+    .file-table tbody tr { height: 44px; }
+    .row-actions { gap: 2px; }
+    .row-actions .icon-btn { width: 32px; height: 32px; }
+    .row-actions .icon-btn svg { width: 16px; height: 16px; }
+    .icon-btn { width: 32px; height: 32px; }
+    .icon-btn svg { width: 17px; height: 17px; }
+
     /* Breadcrumb: smaller text */
     .breadcrumb { font-size: 12px; }
     .breadcrumb-item { padding: 2px 4px; }
     .breadcrumb-sep { padding: 0 1px; }
-    .icon-btn { width: 28px; height: 28px; }
-    .icon-btn svg { width: 16px; height: 16px; }
-    /* Preview modal: take the whole viewport on phones */
+
+    /* Preview modal: full screen on phones */
     .modal-preview {
         width: 100%;
         height: 100%;
         max-height: 100%;
         border-radius: 0;
+    }
+
+    /* Must come after .modal-preview above: the element carries both classes,
+       and this width rule would otherwise override the fullscreen one.
+       Small dialogs keep their compact look but fill nearly the width. */
+    .modal-content:not(.modal-preview) {
+        width: 94%;
+        max-width: none;
     }
     .preview-heading h3 { font-size: 14px; max-width: 26ch; }
     .preview-meta { display: none; }
@@ -1025,12 +1051,14 @@ body.drag-over::after {
     .preview-body .editor-textarea { font-size: 12px; }
     .preview-footer { padding: 10px 14px; }
     .preview-truncated { padding: 8px 12px; font-size: 12px; }
-    /* Pagination: keep it on one row but tighten spacing */
+
+    /* Pagination: keep it on one row, tighten spacing */
     .pager { padding: 6px 8px; gap: 8px; }
     .pager-info { font-size: 11px; }
     .pager-controls { gap: 6px; }
     .pager-pages { gap: 6px; }
-    .pager-btn { padding: 4px 8px; font-size: 11px; }
-    .pager-size { font-size: 11px; padding: 3px 4px; }
+    .pager-btn { padding: 6px 10px; font-size: 12px; }
+    .pager-size { font-size: 12px; padding: 4px 6px; }
     .pager-current { font-size: 11px; min-width: 44px; }
+
 }
